@@ -1,0 +1,59 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+  PROJECT: devops-assignment
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init
+
+      # ECR repos must exist before images can be pushed
+      - name: Create ECR repositories first
+        working-directory: terraform
+        run: terraform apply -auto-approve -target=aws_ecr_repository.backend -target=aws_ecr_repository.worker
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push images
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -f docker/Dockerfile.backend -t $REGISTRY/$PROJECT-backend:$TAG .
+          docker build -f docker/Dockerfile.worker  -t $REGISTRY/$PROJECT-worker:$TAG .
+          docker push $REGISTRY/$PROJECT-backend:$TAG
+          docker push $REGISTRY/$PROJECT-worker:$TAG
+
+      - name: Terraform apply (full stack)
+        working-directory: terraform
+        run: terraform apply -auto-approve -var="image_tag=${{ github.sha }}"
+
+      - name: Show app URL
+        working-directory: terraform
+        run: terraform output app_url

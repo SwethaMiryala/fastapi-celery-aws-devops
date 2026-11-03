@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Task Runner</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f4f5f7; margin: 0; display: grid; place-items: center; min-height: 100vh; }
+    .card { background: #fff; padding: 2rem; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.1); width: min(480px, 92vw); }
+    h1 { margin-top: 0; font-size: 1.4rem; }
+    input { width: 100%; padding: .6rem; box-sizing: border-box; margin-bottom: .8rem; border: 1px solid #ccc; border-radius: 6px; }
+    button { padding: .6rem 1.2rem; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    .row { margin-top: 1rem; font-size: .95rem; }
+    .badge { display: inline-block; padding: .15rem .6rem; border-radius: 999px; font-size: .8rem; background: #e2e8f0; }
+    .SUCCESS { background: #bbf7d0; } .FAILURE { background: #fecaca; }
+    .PENDING, .STARTED { background: #fde68a; }
+    pre { background: #f1f5f9; padding: .7rem; border-radius: 6px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Background Task Runner</h1>
+    <input id="message" value="Hello from the DevOps assignment" />
+    <button id="run">Trigger task</button>
+    <div class="row">Task ID: <code id="taskId">-</code></div>
+    <div class="row">Status: <span id="status" class="badge">idle</span></div>
+    <div class="row">Result:<pre id="result">-</pre></div>
+  </div>
+
+  <script>
+    // Same origin by default (backend serves this page). Override with ?api=http://host:port
+    const API = new URLSearchParams(location.search).get("api") || "";
+    const btn = document.getElementById("run");
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+    const idEl = document.getElementById("taskId");
+    let timer = null;
+
+    function setStatus(s) {
+      statusEl.textContent = s;
+      statusEl.className = "badge " + s;
+    }
+
+    async function poll(taskId) {
+      try {
+        const res = await fetch(`${API}/task_status/${taskId}`);
+        const data = await res.json();
+        setStatus(data.status);
+        if (data.result !== null && data.result !== undefined) {
+          resultEl.textContent = JSON.stringify(data.result, null, 2);
+        }
+        if (data.status === "SUCCESS" || data.status === "FAILURE") {
+          btn.disabled = false;
+          return;
+        }
+      } catch (e) {
+        setStatus("FAILURE");
+        resultEl.textContent = "Error: " + e.message;
+        btn.disabled = false;
+        return;
+      }
+      timer = setTimeout(() => poll(taskId), 1500);
+    }
+
+    btn.addEventListener("click", async () => {
+      clearTimeout(timer);
+      btn.disabled = true;
+      resultEl.textContent = "-";
+      setStatus("PENDING");
+      try {
+        const res = await fetch(`${API}/notify/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: document.getElementById("message").value }),
+        });
+        const data = await res.json();
+        idEl.textContent = data.task_id;
+        poll(data.task_id);
+      } catch (e) {
+        setStatus("FAILURE");
+        resultEl.textContent = "Error: " + e.message;
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
